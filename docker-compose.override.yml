@@ -1,0 +1,22 @@
+# DEVELOPMENT EXTRAS - merged automatically by a plain `docker compose up`.
+# NOT used in production (production runs `-f docker-compose.yml -f docker-compose.prod.yml`).
+#
+# phpMyAdmin = view the database in your browser at http://localhost:8081
+# It is bound to 127.0.0.1, so only YOUR computer can reach it.
+#
+# Want to connect a desktop database tool (DBeaver, VS Code extension...) too?
+# Add under `db:`  ->  ports: ["127.0.0.1:3307:3306"]   (3307 avoids clashing with a local MySQL)
+services:
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: poll-app-phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: db
+    ports:
+      - "127.0.0.1:8081:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - poll-net

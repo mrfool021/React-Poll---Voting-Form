@@ -5,20 +5,27 @@ const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
 const { validateRegister, validateLogin } = require('../validation');
 const { signToken, createRequireAuth } = require('../middleware/auth');
+const { joinAvatar, avatarUrlFor } = require('../lib/users');
 
 // All statements are constant strings; user input only travels as parameters.
 const SQL_INSERT_USER =
   'INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)';
-const SQL_FIND_FOR_LOGIN =
-  'SELECT id, username, email, password_hash FROM users WHERE email = ? OR username = ? LIMIT 1';
-const SQL_FIND_BY_ID = 'SELECT id, username, email, created_at FROM users WHERE id = ?';
+const SQL_FIND_FOR_LOGIN = `SELECT u.id, u.username, u.email, u.password_hash, u.avatar_url, ua.etag AS avatar_ver
+  FROM users u ${joinAvatar('u', 'ua')} WHERE u.email = ? OR u.username = ? LIMIT 1`;
+const SQL_FIND_BY_ID = `SELECT u.id, u.username, u.email, u.created_at, u.avatar_url, ua.etag AS avatar_ver
+  FROM users u ${joinAvatar('u', 'ua')} WHERE u.id = ?`;
 
 const BCRYPT_COST = 12;
 
 const asyncHandler = (fn) => (req, res, next) =>
   Promise.resolve(fn(req, res, next)).catch(next);
 
-const publicUser = (row) => ({ id: row.id, username: row.username, email: row.email });
+const publicUser = (row) => ({
+  id: row.id,
+  username: row.username,
+  email: row.email,
+  avatarUrl: avatarUrlFor(row.id, row.avatar_url, row.avatar_ver),
+});
 
 function createAuthRouter(pool, { jwtSecret, jwtExpiresIn, bcryptCost = BCRYPT_COST, authRateLimit = 10 }) {
   const router = express.Router();
@@ -63,7 +70,7 @@ function createAuthRouter(pool, { jwtSecret, jwtExpiresIn, bcryptCost = BCRYPT_C
         throw err;
       }
 
-      const user = { id: insertId, username, email };
+      const user = { id: insertId, username, email, avatarUrl: null };
       res.status(201).json({ token: signToken(user, tokenOptions), user });
     })
   );

@@ -3,7 +3,7 @@ FROM nginxinc/nginx-unprivileged:stable-alpine
 
 COPY default.conf /etc/nginx/conf.d/default.conf
 
-EXPOSE 8080
+EXPOSE 8080 8443
 
 # Goes through the proxy to the API, so it verifies the whole chain
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

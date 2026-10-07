@@ -1,14 +1,27 @@
+# ----------------------------------------------------------------------------
+# PRODUCTION-SAFE BASE. Only the proxy publishes a port.
+#
+#   dev  :  docker compose up -d --build
+#           (docker-compose.override.yml is merged automatically: DB port + phpMyAdmin,
+#            both bound to 127.0.0.1)
+#   prod :  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#           (skips the override file, adds HTTPS - see docker-compose.prod.yml)
+# ----------------------------------------------------------------------------
 name: poll-app
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   # --------------------------------------------------------------------------
-  # db - MySQL 8.4 (Port 3306 mapped to host for VS Code / DB clients)
+  # db - MySQL 8.4 (reachable only from inside poll-net)
   # --------------------------------------------------------------------------
   db:
     image: mysql:8.4
     restart: unless-stopped
-    ports:
-      - "3306:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-pollsdb}
@@ -19,6 +32,7 @@ services:
       - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     networks:
       - poll-net
+    logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysqladmin ping -h 127.0.0.1 -u root --silent"]
       interval: 10s
@@ -47,15 +61,21 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
       ENFORCE_ONE_VOTE: ${ENFORCE_ONE_VOTE:-true}
+      POLL_IMAGE_MAX_BYTES: ${POLL_IMAGE_MAX_BYTES:-1572864}
+      AVATAR_MAX_BYTES: ${AVATAR_MAX_BYTES:-262144}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-600}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
     depends_on:
       db:
         condition: service_healthy
     networks:
       - poll-net
+    logging: *default-logging
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    mem_limit: 512m
 
   # --------------------------------------------------------------------------
   # frontend - Vite build served by unprivileged Nginx
@@ -69,20 +89,22 @@ services:
     restart: unless-stopped
     networks:
       - poll-net
+    logging: *default-logging
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    mem_limit: 128m
 
   # --------------------------------------------------------------------------
-  # proxy - the single public entry point (host :8080 -> container :8080)
+  # proxy - the single public entry point
   # --------------------------------------------------------------------------
   proxy:
     build:
       context: ./proxy
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${HTTP_PORT:-8080}:8080"
     depends_on:
       frontend:
         condition: service_healthy
@@ -90,27 +112,12 @@ services:
         condition: service_healthy
     networks:
       - poll-net
+    logging: *default-logging
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
-
-  # --------------------------------------------------------------------------
-  # phpmyadmin - Database web UI available at http://localhost:8081
-  # --------------------------------------------------------------------------
-  phpmyadmin:
-    image: phpmyadmin/phpmyadmin
-    container_name: poll-app-phpmyadmin
-    restart: unless-stopped
-    environment:
-      PMA_HOST: db
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-    ports:
-      - "8081:80"
-    depends_on:
-      - db
-    networks:
-      - poll-net
+    mem_limit: 128m
 
 networks:
   poll-net:

@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS users (
   username       VARCHAR(30)  NOT NULL,
   email          VARCHAR(255) NOT NULL,
   password_hash  VARCHAR(255) NOT NULL,
+  avatar_url     VARCHAR(500) NULL,
   created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_users_username (username),
@@ -81,6 +82,84 @@ CREATE TABLE IF NOT EXISTS votes (
   CONSTRAINT fk_votes_option_poll
     FOREIGN KEY (option_id, poll_id) REFERENCES options (id, poll_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
+-- PlayHub upgrade tables (same definitions as db/migrations/003 - 006)
+-- ---------------------------------------------------------------------------
+-- Images live in their own table so ordinary user queries never drag blobs
+-- around. `etag` changes on every write and is used as a cache-busting ?v= value.
+CREATE TABLE IF NOT EXISTS user_avatars (
+  user_id     INT UNSIGNED NOT NULL,
+  mime        VARCHAR(20)  NOT NULL,
+  data        MEDIUMBLOB   NOT NULL,
+  etag        CHAR(16)     NOT NULL,
+  updated_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id),
+  CONSTRAINT fk_user_avatars_user
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT chk_user_avatars_mime
+    CHECK (mime IN ('image/png', 'image/jpeg', 'image/webp', 'image/gif'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+CREATE TABLE IF NOT EXISTS poll_images (
+  poll_id     INT UNSIGNED NOT NULL,
+  mime        VARCHAR(20)  NOT NULL,
+  data        MEDIUMBLOB   NOT NULL,
+  created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (poll_id),
+  CONSTRAINT fk_poll_images_poll
+    FOREIGN KEY (poll_id) REFERENCES polls (id) ON DELETE CASCADE,
+  CONSTRAINT chk_poll_images_mime
+    CHECK (mime IN ('image/png', 'image/jpeg', 'image/webp', 'image/gif'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+CREATE TABLE IF NOT EXISTS comments (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  poll_id     INT UNSIGNED    NOT NULL,
+  user_id     INT UNSIGNED    NOT NULL,
+  parent_id   BIGINT UNSIGNED NULL,
+  body        VARCHAR(500)    NOT NULL,
+  created_at  TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_comments_id_poll (id, poll_id),
+  KEY idx_comments_poll_parent (poll_id, parent_id, id),
+  KEY idx_comments_parent (parent_id),
+  KEY idx_comments_user (user_id),
+  CONSTRAINT fk_comments_poll
+    FOREIGN KEY (poll_id) REFERENCES polls (id) ON DELETE CASCADE,
+  CONSTRAINT fk_comments_user
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT fk_comments_parent
+    FOREIGN KEY (parent_id, poll_id) REFERENCES comments (id, poll_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+CREATE TABLE IF NOT EXISTS follows (
+  follower_id   INT UNSIGNED NOT NULL,
+  following_id  INT UNSIGNED NOT NULL,
+  created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (follower_id, following_id),
+  KEY idx_follows_following (following_id, created_at),
+  CONSTRAINT fk_follows_follower
+    FOREIGN KEY (follower_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT fk_follows_following
+    FOREIGN KEY (following_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+-- Tracks which db/migrations/*.sql files are already applied (used by db/migrate.sh).
+-- A fresh install already contains everything, so all versions are pre-marked.
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version     VARCHAR(100) NOT NULL,
+  applied_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (version)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO schema_migrations (version) VALUES
+  ('001_users'), ('002_poll_owner'), ('003_avatars'),
+  ('004_poll_images'), ('005_comments'), ('006_follows');
 
 -- ---------------------------------------------------------------------------
 -- Seed data

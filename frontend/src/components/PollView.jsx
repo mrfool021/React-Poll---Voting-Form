@@ -1,14 +1,24 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useAuth } from '../AuthContext.jsx';
 import { getPoll, votePoll } from '../api.js';
+import { links } from '../router.js';
+import { plural, timeAgo } from '../utils.js';
+import AuthImage from './AuthImage.jsx';
+import Avatar from './Avatar.jsx';
+import Comments from './Comments.jsx';
+import Icon from './Icons.jsx';
 import ResultsBar from './ResultsBar.jsx';
 
-const NOTICE_STYLES = {
-  success: 'border-green-200 bg-green-50 text-green-800',
-  info: 'border-blue-200 bg-blue-50 text-blue-800',
-  error: 'border-red-200 bg-red-50 text-red-800',
-};
+const NOTICE = { success: 'notice-success', info: 'notice-info', error: 'notice-error' };
 
-export default function PollView({ pollId, onBack, onSelectUser }) {
+const BackLink = () => (
+  <a href={links.home()} className="btn-ghost -ml-3 mb-2 w-fit">
+    <Icon name="arrowLeft" className="h-4 w-4" /> Back to polls
+  </a>
+);
+
+export default function PollView({ pollId }) {
+  const { user } = useAuth();
   const [poll, setPoll] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -33,6 +43,9 @@ export default function PollView({ pollId, onBack, onSelectUser }) {
   );
 
   useEffect(() => {
+    setVoted(false);
+    setSelected(null);
+    setNotice(null);
     const controller = new AbortController();
     load(controller.signal);
     return () => controller.abort();
@@ -41,13 +54,12 @@ export default function PollView({ pollId, onBack, onSelectUser }) {
   async function handleVote(event) {
     event.preventDefault();
     if (!selected) return;
-
     setSubmitting(true);
     setNotice(null);
     try {
       setPoll(await votePoll(pollId, selected));
       setVoted(true);
-      setNotice({ type: 'success', text: 'Your vote was recorded. Thank you!' });
+      setNotice({ type: 'success', text: 'Your vote was recorded. GG!' });
     } catch (err) {
       if (err.status === 409) {
         setVoted(true);
@@ -65,23 +77,17 @@ export default function PollView({ pollId, onBack, onSelectUser }) {
     }
   }
 
-  const backButton = (
-    <button
-      type="button"
-      onClick={onBack}
-      className="mb-4 text-sm font-medium text-indigo-600 hover:text-indigo-700"
-    >
-      &larr; Back to polls
-    </button>
-  );
-
   if (loading) {
     return (
       <section>
-        {backButton}
-        <div className="flex items-center gap-3 text-slate-500" role="status">
-          <span className="h-5 w-5 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent" />
-          Loading poll&hellip;
+        <BackLink />
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]" role="status" aria-label="Loading poll">
+          <div className="card space-y-4 p-6">
+            <div className="skeleton h-48" />
+            <div className="skeleton h-8 w-3/4" />
+            <div className="skeleton h-4 w-1/2" />
+          </div>
+          <div className="card skeleton h-64" />
         </div>
       </section>
     );
@@ -90,14 +96,10 @@ export default function PollView({ pollId, onBack, onSelectUser }) {
   if (error || !poll) {
     return (
       <section>
-        {backButton}
-        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">
-          <p className="mb-3 text-sm">{error || 'Poll not found.'}</p>
-          <button
-            type="button"
-            onClick={() => load()}
-            className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700"
-          >
+        <BackLink />
+        <div role="alert" className="notice-error">
+          <p className="mb-3">{error || 'Poll not found.'}</p>
+          <button type="button" onClick={() => load()} className="btn-danger btn-sm">
             Try again
           </button>
         </div>
@@ -110,82 +112,91 @@ export default function PollView({ pollId, onBack, onSelectUser }) {
 
   return (
     <section>
-      {backButton}
-      <h1 className="mb-1 text-2xl font-bold">{poll.question}</h1>
-      {poll.creator && (
-        <p className="mb-1 text-sm text-slate-500">
-          Created by{' '}
-          {onSelectUser ? (
-            <button
-              type="button"
-              onClick={() => onSelectUser(poll.creator.id)}
-              className="font-medium text-indigo-600 hover:text-indigo-700"
-            >
-              {poll.creator.username}
-            </button>
-          ) : (
-            poll.creator.username
-          )}
-        </p>
-      )}
-      <p className="mb-6 text-sm text-slate-500">
-        {poll.totalVotes} {poll.totalVotes === 1 ? 'vote' : 'votes'} in total
-        {!poll.isActive && ' · This poll is closed'}
-      </p>
-
-      {notice && (
-        <p
-          role="status"
-          className={`mb-5 rounded-md border p-3 text-sm ${NOTICE_STYLES[notice.type]}`}
-        >
-          {notice.text}
-        </p>
-      )}
-
-      {canVote && (
-        <form onSubmit={handleVote} className="mb-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-          <fieldset>
-            <legend className="mb-3 text-sm font-medium">Choose one option</legend>
-            <div className="space-y-2">
-              {poll.options.map((option) => (
-                <label
-                  key={option.id}
-                  className="flex cursor-pointer items-center gap-3 rounded-md border border-slate-200 px-3 py-2 hover:bg-slate-50"
-                >
-                  <input
-                    type="radio"
-                    name="option"
-                    value={option.id}
-                    checked={selected === option.id}
-                    onChange={() => setSelected(option.id)}
-                    className="h-4 w-4 accent-indigo-600"
-                  />
-                  <span>{option.label}</span>
-                </label>
-              ))}
+      <BackLink />
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        {/* ------------ Poll column ------------ */}
+        <div className="space-y-5">
+          <article className="card overflow-hidden">
+            {poll.imageUrl && (
+              <div className="flex max-h-[70vh] w-full items-center justify-center overflow-hidden bg-raised">
+                <AuthImage
+                  src={poll.imageUrl}
+                  alt={`Image attached to the poll: ${poll.question}`}
+                  className="max-h-[70vh] w-full object-contain"
+                />
+              </div>
+            )}
+            <div className="p-4 sm:p-6">
+              {poll.creator && (
+                <a href={links.user(poll.creator.id)} className="mb-3 flex w-fit items-center gap-2.5 text-sm text-muted hover:text-ink">
+                  <Avatar user={poll.creator} size="md" />
+                  <span>
+                    <span className="block font-bold text-ink">{poll.creator.username}</span>
+                    <span className="text-xs">{timeAgo(poll.createdAt)}</span>
+                  </span>
+                </a>
+              )}
+              <h1 className="break-words font-display text-2xl font-extrabold leading-tight sm:text-3xl">{poll.question}</h1>
+              <p className="mt-2 text-sm text-muted">
+                {plural(poll.totalVotes, 'vote')} in total
+                {!poll.isActive && ' · This poll is closed'}
+              </p>
             </div>
-          </fieldset>
-          <button
-            type="submit"
-            disabled={!selected || submitting}
-            className="mt-4 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {submitting ? 'Submitting…' : 'Submit vote'}
-          </button>
-        </form>
-      )}
+          </article>
 
-      <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Results</h2>
-        {poll.options.map((option) => (
-          <ResultsBar
-            key={option.id}
-            label={option.label}
-            votes={option.votes}
-            total={poll.totalVotes}
-            highlight={topVotes > 0 && option.votes === topVotes}
-          />
-        ))}
+          {notice && (
+            <p role="status" className={NOTICE[notice.type]}>
+              {notice.text}
+            </p>
+          )}
+
+          {canVote && (
+            <form onSubmit={handleVote} className="card p-4 sm:p-6">
+              <fieldset>
+                <legend className="section-title mb-3">Choose one option</legend>
+                <div className="space-y-2">
+                  {poll.options.map((option) => (
+                    <label
+                      key={option.id}
+                      className={`flex min-h-[48px] cursor-pointer items-center gap-3 rounded-xl border px-3.5 py-2.5 transition ${
+                        selected === option.id ? 'border-brand bg-brand/10 shadow-glow' : 'border-line hover:border-brand/50 hover:bg-raised'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="option"
+                        value={option.id}
+                        checked={selected === option.id}
+                        onChange={() => setSelected(option.id)}
+                        className="h-5 w-5 shrink-0 accent-brand"
+                      />
+                      <span className="min-w-0 break-words">{option.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              <button type="submit" disabled={!selected || submitting} className="btn-primary mt-4 w-full sm:w-auto">
+                {submitting ? 'Submitting…' : 'Submit vote'}
+              </button>
+            </form>
+          )}
+
+          <div className="card space-y-4 p-4 sm:p-6">
+            <h2 className="section-title">Results</h2>
+            {poll.options.map((option) => (
+              <ResultsBar
+                key={option.id}
+                label={option.label}
+                votes={option.votes}
+                total={poll.totalVotes}
+                highlight={topVotes > 0 && option.votes === topVotes}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* ------------ Conversation column ------------ */}
+        <Comments pollId={poll.id} key={poll.id} />
       </div>
     </section>
   );

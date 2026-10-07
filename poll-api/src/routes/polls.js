@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { validateNewPoll, parseId } = require('../validation');
+const { joinAvatar, publicUserFromRow } = require('../lib/users');
 
 // ---------------------------------------------------------------------------
 // SQL - all statements are constant strings; user input only ever travels in
@@ -11,28 +12,40 @@ const { validateNewPoll, parseId } = require('../validation');
 // ---------------------------------------------------------------------------
 const SELECT_POLLS = `
   SELECT p.id, p.question, p.is_active, p.created_at, p.created_by,
-         u.username AS creator,
+         u.username AS creator, u.avatar_url AS creator_avatar_url, ua.etag AS creator_avatar_ver,
+         (pi.poll_id IS NOT NULL) AS has_image,
+         (SELECT COUNT(*) FROM comments c WHERE c.poll_id = p.id) AS comment_count,
          o.id AS option_id, o.label, COUNT(v.id) AS votes
   FROM polls p
   JOIN options o ON o.poll_id = p.id
   LEFT JOIN votes v ON v.option_id = o.id
   LEFT JOIN users u ON u.id = p.created_by
+  ${joinAvatar('u', 'ua')}
+  LEFT JOIN poll_images pi ON pi.poll_id = p.id
 `;
 const GROUP_ORDER = `
-  GROUP BY p.id, p.question, p.is_active, p.created_at, p.created_by, u.username, o.id, o.label
+  GROUP BY p.id, p.question, p.is_active, p.created_at, p.created_by,
+           u.username, u.avatar_url, ua.etag, pi.poll_id, o.id, o.label
   ORDER BY p.created_at DESC, p.id DESC, o.id ASC
 `;
 
 const SQL_LIST_ACTIVE = `${SELECT_POLLS} WHERE p.is_active = 1 ${GROUP_ORDER}`;
+// Feed of polls created by accounts the logged-in user follows
+const SQL_LIST_FOLLOWING = `${SELECT_POLLS}
+  WHERE p.is_active = 1
+    AND p.created_by IN (SELECT f.following_id FROM follows f WHERE f.follower_id = ?)
+  ${GROUP_ORDER}`;
 const SQL_BY_ID = `${SELECT_POLLS} WHERE p.id = ? ${GROUP_ORDER}`;
 const SQL_ACTIVE_CHECK = 'SELECT id FROM polls WHERE id = ? AND is_active = 1';
 const SQL_INSERT_POLL = 'INSERT INTO polls (question, created_by) VALUES (?, ?)';
 const SQL_INSERT_OPTION = 'INSERT INTO options (poll_id, label) VALUES (?, ?)';
+const SQL_INSERT_IMAGE = 'INSERT INTO poll_images (poll_id, mime, data) VALUES (?, ?, ?)';
+const SQL_GET_IMAGE =
+  'SELECT pi.mime, pi.data FROM poll_images pi JOIN polls p ON p.id = pi.poll_id WHERE pi.poll_id = ? AND p.is_active = 1';
 const SQL_INSERT_VOTE =
   'INSERT INTO votes (poll_id, option_id, voter_hash) VALUES (?, ?, ?)';
 
-const asyncHandler = (fn) => (req, res, next) =>
-  Promise.resolve(fn(req, res, next)).catch(next);
+const { asyncHandler } = require('../lib/users');
 
 /** Turns flat JOIN rows into [{ id, question, options: [{ id, label, votes }] }] */
 function rowsToPolls(rows) {
@@ -44,7 +57,16 @@ function rowsToPolls(rows) {
         question: row.question,
         isActive: Boolean(row.is_active),
         createdAt: row.created_at,
-        creator: row.creator ? { id: row.created_by, username: row.creator } : null,
+        creator: row.creator
+          ? publicUserFromRow({
+              id: row.created_by,
+              username: row.creator,
+              avatar_url: row.creator_avatar_url,
+              avatar_ver: row.creator_avatar_ver,
+            })
+          : null,
+        imageUrl: row.has_image ? `/api/polls/${row.id}/image` : null,
+        commentCount: Number(row.comment_count || 0),
         totalVotes: 0,
         options: [],
       });
@@ -57,7 +79,10 @@ function rowsToPolls(rows) {
   return [...byId.values()];
 }
 
-function createPollsRouter(pool, { enforceOneVote, voterSalt, requireAuth }) {
+function createPollsRouter(
+  pool,
+  { enforceOneVote, voterSalt, requireAuth, pollImageMaxBytes }
+) {
   const router = express.Router();
 
   // Everything under /api/polls needs a logged-in user (login comes first)
@@ -88,12 +113,43 @@ function createPollsRouter(pool, { enforceOneVote, voterSalt, requireAuth }) {
       .digest('hex');
   }
 
-  // GET /api/polls - active polls with per-option vote counts
+  const createLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 10,
+    keyGenerator: (req) => `user:${req.user.id}`,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'You are posting too fast, please wait a moment.' },
+  });
+
+  // GET /api/polls[?scope=following] - active polls with per-option vote counts
   router.get(
     '/',
     asyncHandler(async (req, res) => {
-      const [rows] = await pool.execute(SQL_LIST_ACTIVE);
+      const [rows] =
+        req.query.scope === 'following'
+          ? await pool.execute(SQL_LIST_FOLLOWING, [req.user.id])
+          : await pool.execute(SQL_LIST_ACTIVE);
       res.json(rowsToPolls(rows));
+    })
+  );
+
+  // GET /api/polls/:id/image - the attached photo (auth required, so the SPA
+  // fetches it with the bearer token and shows it through a blob: URL).
+  // Registered before '/:id' for clarity; the paths cannot collide anyway.
+  router.get(
+    '/:id/image',
+    asyncHandler(async (req, res) => {
+      const id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ error: 'Invalid poll id.' });
+      const [rows] = await pool.execute(SQL_GET_IMAGE, [id]);
+      if (rows.length === 0) return res.status(404).json({ error: 'Image not found.' });
+      res.set({
+        'Content-Type': rows[0].mime,
+        'Cache-Control': 'private, max-age=31536000, immutable', // poll images never change
+        'Content-Security-Policy': "default-src 'none'; sandbox",
+      });
+      return res.end(rows[0].data);
     })
   );
 
@@ -113,12 +169,13 @@ function createPollsRouter(pool, { enforceOneVote, voterSalt, requireAuth }) {
   // POST /api/polls - create a poll with its options (single transaction)
   router.post(
     '/',
+    createLimiter,
     asyncHandler(async (req, res) => {
-      const result = validateNewPoll(req.body);
+      const result = validateNewPoll(req.body, { pollImageMaxBytes });
       if (!result.ok) {
         return res.status(400).json({ error: 'Validation failed.', details: result.errors });
       }
-      const { question, options } = result.value;
+      const { question, options, image } = result.value;
 
       const conn = await pool.getConnection();
       let pollId;
@@ -128,6 +185,11 @@ function createPollsRouter(pool, { enforceOneVote, voterSalt, requireAuth }) {
         pollId = inserted.insertId;
         for (const label of options) {
           await conn.execute(SQL_INSERT_OPTION, [pollId, label]);
+        }
+        // Same transaction as the poll + options: the photo exists only if the
+        // whole poll was stored successfully.
+        if (image) {
+          await conn.execute(SQL_INSERT_IMAGE, [pollId, image.mime, image.buffer]);
         }
         await conn.commit();
       } catch (err) {

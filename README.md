@@ -1,6 +1,10 @@
-# Poll & Voting App
+# PlayHub - Poll & Voting App
 
 Full-stack final project for **Integrative Programming and Technologies** and **System Architecture and Integration**.
+
+**First time here? Read [START_HERE.md](START_HERE.md): a step-by-step beginner guide (VS Code + Docker).**
+
+**New in this version:** dark/light theme, avatars, image polls, comments, followers - see **[UPGRADE.md](UPGRADE.md)** for the migration, API and production-deployment guide.
 
 **Stack:** React (Vite) + Tailwind CSS · Node.js/Express · MySQL 8.4 · Nginx · Docker Compose
 
@@ -9,7 +13,7 @@ Full-stack final project for **Integrative Programming and Technologies** and **
 Requirements: Docker Engine + Docker Compose v2.
 
 ```bash
-cp .env.example .env          # then edit .env and replace every "change_me" value
+cp .env.example .env          # then edit .env and replace every "change_me" value (openssl rand -hex 32)
 docker compose up -d --build
 ```
 
@@ -40,7 +44,8 @@ Open **http://localhost:8080**.
                                                        volume: poll-db-data
 ```
 
-Only the proxy publishes a host port (8080). MySQL is reachable solely from inside `poll-net`.
+Only the proxy publishes a host port (8080). MySQL is reachable solely from inside `poll-net`
+(in development, `docker-compose.override.yml` additionally adds phpMyAdmin at http://localhost:8081, reachable from your computer only).
 
 Startup order is enforced with health checks: `db` (healthy) → `poll-api` (healthy) → `proxy`; `frontend` (healthy) → `proxy`.
 
@@ -51,10 +56,16 @@ Startup order is enforced with health checks: `db` (healthy) → `poll-api` (hea
 | GET | `/health` | Liveness probe, returns `200 {"status":"ok"}` |
 | GET | `/api/polls` | Active polls with per-option vote counts 🔒 |
 | GET | `/api/polls/:id` | One poll 🔒 |
-| POST | `/api/polls` | Create a poll — body `{ "question": "...", "options": ["A", "B"] }` (2–10 options) 🔒 |
+| POST | `/api/polls` | Create a poll — body `{ "question": "...", "options": ["A", "B"], "image": "data:image/jpeg;base64,..." }` (2–10 options, `image` optional but never standalone) 🔒 |
 | POST | `/api/polls/:id/vote` | Vote — body `{ "optionId": 3 }` (409 if this account already voted) 🔒 |
 | GET | `/api/search?q=text` | Search poll questions and usernames (2–50 characters) 🔒 |
-| GET | `/api/users/:id` | Public profile: username, join date, polls created 🔒 |
+| GET | `/api/users/:id` | Public profile: avatar, join date, follower counts, polls created 🔒 |
+| PUT/DELETE | `/api/users/me/avatar` | Set avatar (`{image}` base64 or `{url}` https) / remove it 🔒 |
+| POST/DELETE | `/api/users/:id/follow` | Follow / unfollow 🔒 |
+| GET | `/api/users/:id/followers`, `/following` | Paginated lists 🔒 |
+| GET/POST | `/api/polls/:id/comments` | Read / write comments, `parentId` for replies 🔒 |
+| DELETE | `/api/polls/:id/comments/:commentId` | Delete your own comment 🔒 |
+| GET | `/api/polls/:id/image` | Photo attached to a poll 🔒 |
 | POST | `/api/auth/register` | Sign up — body `{ "username", "email", "password" }` → `201 { token, user }` (409 if taken) |
 | POST | `/api/auth/login` | Log in — body `{ "identifier", "password" }` (username or email) → `{ token, user }` |
 | GET | `/api/auth/me` | The logged-in user 🔒 |
@@ -70,11 +81,10 @@ JWT_SECRET=<at least 32 random characters>   # e.g. openssl rand -hex 32
 JWT_EXPIRES_IN=7d                            # optional, default 7d
 ```
 
-**Existing database?** `init.sql` only runs on an empty volume. To upgrade without losing data, run each migration **once**, in order:
+**Existing database?** `init.sql` only runs on an empty volume. Apply new schema changes with the tracked migration runner (safe to run repeatedly, backs nothing up by itself - run `./db/backup.sh` first):
 
 ```bash
-docker compose exec -T db sh -c 'mysql -u root -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' < db/migrations/001_users.sql
-docker compose exec -T db sh -c 'mysql -u root -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' < db/migrations/002_poll_owner.sql
+./db/migrate.sh
 ```
 
 (Or, if the data is disposable: `docker compose down -v` and start fresh.)
@@ -116,8 +126,9 @@ cd frontend && npm install && npm run dev      # http://localhost:5173 (proxies 
 | --- | --- |
 | SQL injection | Parameterized queries only; IDs validated as positive integers; constant SQL strings |
 | XSS | Tags/control characters stripped on input; React escapes output; strict CSP header on the frontend |
-| Input validation | Length limits, option count/uniqueness, 10 kb body limit |
-| CORS | Explicit origin allow-list (`CORS_ORIGIN`), GET/POST only |
+| Input validation | Length limits, option count/uniqueness, 10 kb body limit (larger only on the 2 image routes, and only after the token is verified) |
+| Uploads | Allow-list PNG/JPEG/WebP/GIF, magic-byte check, no SVG, size caps, served with `nosniff` + sandbox CSP |
+| CORS | Explicit origin allow-list (`CORS_ORIGIN`), GET/POST/PUT/DELETE |
 | HTTP hardening | Helmet headers, `x-powered-by` disabled, `server_tokens off` |
 | Abuse control | Rate limiting (global + stricter on voting), one vote per voter per poll |
 | Privacy | Voters are stored as a salted SHA-256 hash, never as a raw IP address |
@@ -132,8 +143,9 @@ cd frontend && npm install && npm run dev      # http://localhost:5173 (proxies 
 ```
 poll-app/
 ├── docker-compose.yml
-├── .env.example
-├── db/init.sql, db/migrations/
+├── .env.example, UPGRADE.md
+├── docker-compose.override.yml (dev extras) · docker-compose.prod.yml (HTTPS)
+├── db/init.sql, db/migrations/, db/migrate.sh, db/backup.sh
 ├── poll-api/        Dockerfile (base → test → production), src/, src/tests/poll.test.js
 ├── frontend/        Dockerfile (build → nginx), src/AuthContext.jsx, src/components/{AuthForm,PollList,CreatePoll,PollView,SearchView,ProfileView,ResultsBar}.jsx
 └── proxy/           Dockerfile, default.conf

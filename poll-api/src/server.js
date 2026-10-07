@@ -40,6 +40,10 @@ const app = createApp(pool, {
   voterSalt: required('VOTER_SALT'),
   jwtSecret: jwtSecret,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
+  pollImageMaxBytes: Number(process.env.POLL_IMAGE_MAX_BYTES) || undefined,
+  avatarMaxBytes: Number(process.env.AVATAR_MAX_BYTES) || undefined,
+  rateLimitMax: Number(process.env.RATE_LIMIT_MAX) || undefined,
+  trustProxyHops: Number(process.env.TRUST_PROXY_HOPS) || undefined,
 });
 
 const port = Number(process.env.PORT || 3000);

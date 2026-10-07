@@ -6,6 +6,7 @@ import {
   loginUser,
   registerUser,
   setToken,
+  clearImageCache,
 } from './api.js';
 
 const AuthContext = createContext(null);
@@ -57,11 +58,15 @@ export function AuthProvider({ children }) {
   const logout = useCallback(() => {
     setToken(null);
     setUser(null);
+    clearImageCache(); // protected images belong to the session
   }, []);
 
+  // Merge changed fields (e.g. a new avatarUrl) into the logged-in user
+  const updateUser = useCallback((patch) => setUser((u) => (u ? { ...u, ...patch } : u)), []);
+
   const value = useMemo(
-    () => ({ user, checking, login, register, logout }),
-    [user, checking, login, register, logout]
+    () => ({ user, checking, login, register, logout, updateUser }),
+    [user, checking, login, register, logout, updateUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

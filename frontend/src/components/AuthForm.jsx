@@ -1,9 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../AuthContext.jsx';
 
-const INPUT_CLASS =
-  'w-full rounded-md border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500';
-
 /**
  * One form for both flows.
  *   mode="login"  -> identifier (username or email) + password
@@ -38,15 +35,11 @@ export default function AuthForm({ mode, onSuccess, onSwitchMode }) {
       setError(problem);
       return;
     }
-
     setSubmitting(true);
     setError('');
     try {
-      if (isSignup) {
-        await register({ username: username.trim(), email: email.trim(), password });
-      } else {
-        await login({ identifier: identifier.trim(), password });
-      }
+      if (isSignup) await register({ username: username.trim(), email: email.trim(), password });
+      else await login({ identifier: identifier.trim(), password });
       onSuccess();
     } catch (err) {
       setError(err.message);
@@ -55,118 +48,66 @@ export default function AuthForm({ mode, onSuccess, onSwitchMode }) {
   }
 
   return (
-    <section className="mx-auto max-w-md">
-      <h1 className="mb-6 text-2xl font-bold">{isSignup ? 'Create your account' : 'Log in'}</h1>
+    <section className="mx-auto w-full max-w-md">
+      <h2 className="mb-5 font-display text-3xl font-extrabold">
+        {isSignup ? 'Create your account' : 'Player login'}
+      </h2>
 
-      <form
-        onSubmit={handleSubmit}
-        className="space-y-5 rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
-      >
+      <form onSubmit={handleSubmit} className="card space-y-5 p-5 sm:p-6">
         {isSignup ? (
           <>
             <div>
-              <label htmlFor="username" className="mb-1 block text-sm font-medium">
+              <label htmlFor="username" className="label">
                 Username
               </label>
-              <input
-                id="username"
-                type="text"
-                autoComplete="username"
-                value={username}
-                maxLength={30}
-                onChange={(e) => setUsername(e.target.value)}
-                className={INPUT_CLASS}
-                required
-              />
+              <input id="username" type="text" autoComplete="username" autoCapitalize="none" autoCorrect="off" value={username} maxLength={30} onChange={(e) => setUsername(e.target.value)} className="input" required />
             </div>
             <div>
-              <label htmlFor="email" className="mb-1 block text-sm font-medium">
+              <label htmlFor="email" className="label">
                 Email
               </label>
-              <input
-                id="email"
-                type="email"
-                autoComplete="email"
-                value={email}
-                maxLength={255}
-                onChange={(e) => setEmail(e.target.value)}
-                className={INPUT_CLASS}
-                required
-              />
+              <input id="email" type="email" inputMode="email" autoComplete="email" autoCapitalize="none" value={email} maxLength={255} onChange={(e) => setEmail(e.target.value)} className="input" required />
             </div>
           </>
         ) : (
           <div>
-            <label htmlFor="identifier" className="mb-1 block text-sm font-medium">
+            <label htmlFor="identifier" className="label">
               Username or email
             </label>
-            <input
-              id="identifier"
-              type="text"
-              autoComplete="username"
-              value={identifier}
-              maxLength={255}
-              onChange={(e) => setIdentifier(e.target.value)}
-              className={INPUT_CLASS}
-              required
-            />
+            <input id="identifier" type="text" autoComplete="username" autoCapitalize="none" autoCorrect="off" value={identifier} maxLength={255} onChange={(e) => setIdentifier(e.target.value)} className="input" required />
           </div>
         )}
 
         <div>
-          <label htmlFor="password" className="mb-1 block text-sm font-medium">
+          <label htmlFor="password" className="label">
             Password
           </label>
-          <input
-            id="password"
-            type="password"
-            autoComplete={isSignup ? 'new-password' : 'current-password'}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className={INPUT_CLASS}
-            required
-          />
-          {isSignup && <p className="mt-1 text-xs text-slate-500">At least 8 characters.</p>}
+          <input id="password" type="password" autoComplete={isSignup ? 'new-password' : 'current-password'} value={password} onChange={(e) => setPassword(e.target.value)} className="input" required />
+          {isSignup && <p className="mt-1 text-xs text-muted">At least 8 characters.</p>}
         </div>
 
         {isSignup && (
           <div>
-            <label htmlFor="confirm" className="mb-1 block text-sm font-medium">
+            <label htmlFor="confirm" className="label">
               Confirm password
             </label>
-            <input
-              id="confirm"
-              type="password"
-              autoComplete="new-password"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              className={INPUT_CLASS}
-              required
-            />
+            <input id="confirm" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className="input" required />
           </div>
         )}
 
         {error && (
-          <p role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <p role="alert" className="notice-error">
             {error}
           </p>
         )}
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
+        <button type="submit" disabled={submitting} className="btn-primary w-full">
           {submitting ? 'Please wait…' : isSignup ? 'Sign up' : 'Log in'}
         </button>
 
-        <p className="text-center text-sm text-slate-600">
+        <p className="text-center text-sm text-muted">
           {isSignup ? 'Already have an account?' : 'New here?'}{' '}
-          <button
-            type="button"
-            onClick={onSwitchMode}
-            className="font-medium text-indigo-600 hover:text-indigo-700"
-          >
+          <button type="button" onClick={onSwitchMode} className="font-semibold text-brand hover:underline">
             {isSignup ? 'Log in' : 'Create an account'}
           </button>
         </p>

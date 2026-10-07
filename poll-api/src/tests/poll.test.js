@@ -251,9 +251,10 @@ describe('POST /api/polls', () => {
   });
 
   it('rejects oversized bodies with 413', async () => {
+    // Text-only routes keep the strict 10 kB cap (only the image routes allow more)
     const res = await authed(app)
-      .post('/api/polls')
-      .send({ question: 'Valid question?', options: ['A', 'B'], junk: 'x'.repeat(20000) });
+      .post('/api/polls/1/vote')
+      .send({ optionId: 1, junk: 'x'.repeat(20000) });
     expect(res.status).toBe(413);
   });
 });

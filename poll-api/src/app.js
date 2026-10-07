@@ -6,7 +6,10 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const { createPollsRouter } = require('./routes/polls');
 const { createAuthRouter } = require('./routes/auth');
-const { createSearchRouter, createUsersRouter } = require('./routes/search');
+const { createSearchRouter } = require('./routes/search');
+const { createUsersRouter } = require('./routes/users');
+const { createCommentsRouter } = require('./routes/comments');
+const { DEFAULT_LIMITS } = require('./images');
 const { createRequireAuth } = require('./middleware/auth');
 
 /**
@@ -19,17 +22,20 @@ function createApp(pool, config = {}) {
     corsOrigins = ['http://localhost:8080', 'http://localhost:5173'],
     enforceOneVote = true,
     voterSalt = 'dev-only-salt',
-    rateLimitMax = 300,
+    rateLimitMax = 600, // avatars/photos are separate requests, so allow more than a text-only API
+    pollImageMaxBytes = DEFAULT_LIMITS.pollImageMaxBytes,
+    avatarMaxBytes = DEFAULT_LIMITS.avatarMaxBytes,
     jwtSecret = 'dev-only-jwt-secret', // server.js makes the real one mandatory
     jwtExpiresIn = '7d',
     bcryptCost = 12,
     authRateLimit = 10,
+    trustProxyHops = 1, // Nginx proxy = 1; add 1 for each extra load balancer / CDN in front
   } = config;
 
   const app = express();
 
   app.disable('x-powered-by');
-  app.set('trust proxy', 1); // exactly one hop: the Nginx proxy container
+  app.set('trust proxy', trustProxyHops);
 
   app.use(helmet());
 
@@ -40,13 +46,33 @@ function createApp(pool, config = {}) {
       origin(origin, callback) {
         callback(null, !origin || corsOrigins.includes(origin));
       },
-      methods: ['GET', 'POST'],
+      methods: ['GET', 'POST', 'PUT', 'DELETE'],
       allowedHeaders: ['Content-Type', 'Authorization'],
       maxAge: 600,
     })
   );
 
-  app.use(express.json({ limit: '10kb' }));
+  const requireAuth = createRequireAuth(jwtSecret);
+
+  // Body size: 10 kB everywhere, except the two routes that carry a base64 image
+  // (create poll, set avatar). Those get a larger limit - but only AFTER the
+  // bearer token is verified, so anonymous clients can never make the server
+  // buffer megabytes.
+  const smallJson = express.json({ limit: '10kb' });
+  const imageBodyLimit =
+    Math.ceil((Math.max(pollImageMaxBytes, avatarMaxBytes) * 4) / 3) + 16 * 1024;
+  const imageJson = express.json({ limit: imageBodyLimit });
+  const isImageRoute = (req) => {
+    const path = req.path.replace(/\/+$/, '');
+    return (
+      (req.method === 'POST' && path === '/api/polls') ||
+      (req.method === 'PUT' && path === '/api/users/me/avatar')
+    );
+  };
+  app.use((req, res, next) => {
+    if (!isImageRoute(req)) return smallJson(req, res, next);
+    return requireAuth(req, res, (err) => (err ? next(err) : imageJson(req, res, next)));
+  });
 
   // Liveness probe for Docker / load balancers / uptime monitors
   app.get('/health', (req, res) => {
@@ -70,10 +96,13 @@ function createApp(pool, config = {}) {
   );
 
   // Everything below needs a valid login token
-  const requireAuth = createRequireAuth(jwtSecret);
-  app.use('/api/polls', createPollsRouter(pool, { enforceOneVote, voterSalt, requireAuth }));
+  app.use('/api/polls/:id/comments', createCommentsRouter(pool, { requireAuth }));
+  app.use(
+    '/api/polls',
+    createPollsRouter(pool, { enforceOneVote, voterSalt, requireAuth, pollImageMaxBytes })
+  );
   app.use('/api/search', createSearchRouter(pool, { requireAuth }));
-  app.use('/api/users', createUsersRouter(pool, { requireAuth }));
+  app.use('/api/users', createUsersRouter(pool, { requireAuth, avatarMaxBytes }));
 
   app.use((req, res) => {
     res.status(404).json({ error: 'Not found.' });
@@ -85,7 +114,7 @@ function createApp(pool, config = {}) {
       return res.status(400).json({ error: 'Malformed JSON body.' });
     }
     if (err.type === 'entity.too.large') {
-      return res.status(413).json({ error: 'Request body too large.' });
+      return res.status(413).json({ error: 'Request body too large (images must be compressed).' });
     }
     console.error('Unhandled error:', err);
     // Never leak internals (stack traces, SQL messages) to clients

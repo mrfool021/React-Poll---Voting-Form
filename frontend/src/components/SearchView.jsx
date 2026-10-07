@@ -1,19 +1,26 @@
 import { useEffect, useState } from 'react';
 import { searchAll } from '../api.js';
+import { links } from '../router.js';
+import { formatDate, timeAgo } from '../utils.js';
+import AuthImage from './AuthImage.jsx';
+import Avatar from './Avatar.jsx';
 
-const formatDate = (value) => new Date(value).toLocaleDateString();
-
-export default function SearchView({ query, onSelectPoll, onSelectUser }) {
+export default function SearchView({ query }) {
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
+    if (query.trim().length < 2) {
+      setLoading(false);
+      setError('Type at least 2 characters to search.');
+      return undefined;
+    }
     const controller = new AbortController();
     setLoading(true);
     setError('');
     searchAll(query, controller.signal)
-      .then((data) => setResults(data))
+      .then(setResults)
       .catch((err) => {
         if (err.name !== 'AbortError') setError(err.message);
       })
@@ -25,44 +32,39 @@ export default function SearchView({ query, onSelectPoll, onSelectUser }) {
 
   return (
     <section>
-      <h1 className="mb-1 text-2xl font-bold">Search results</h1>
-      <p className="mb-6 text-sm text-slate-500">
-        Showing matches for <strong className="font-semibold">&ldquo;{query}&rdquo;</strong>
+      <h1 className="font-display text-3xl font-extrabold">Search results</h1>
+      <p className="mb-6 mt-1 text-sm text-muted">
+        Matches for <strong className="text-ink">&ldquo;{query}&rdquo;</strong>
       </p>
 
       {loading && (
-        <div className="flex items-center gap-3 text-slate-500" role="status">
-          <span className="h-5 w-5 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent" />
-          Searching&hellip;
+        <div className="space-y-2" role="status" aria-label="Searching">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="skeleton h-16" />
+          ))}
         </div>
       )}
-
       {!loading && error && (
-        <p role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+        <p role="alert" className="notice-error">
           {error}
         </p>
       )}
 
       {!loading && !error && results && (
-        <div className="space-y-8">
+        <div className="grid gap-8 lg:grid-cols-2">
           <div>
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
-              Profiles ({results.users.length})
-            </h2>
+            <h2 className="section-title mb-3">Players ({results.users.length})</h2>
             {results.users.length === 0 ? (
-              <p className="text-sm text-slate-500">No profiles match.</p>
+              <p className="text-sm text-muted">No players match.</p>
             ) : (
               <ul className="space-y-2">
                 {results.users.map((u) => (
                   <li key={u.id}>
-                    <button
-                      type="button"
-                      onClick={() => onSelectUser(u.id)}
-                      className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3 text-left shadow-sm hover:border-indigo-300 hover:bg-indigo-50"
-                    >
-                      <span className="font-medium">{u.username}</span>
-                      <span className="text-xs text-slate-500">Joined {formatDate(u.createdAt)}</span>
-                    </button>
+                    <a href={links.user(u.id)} className="card card-hover flex items-center gap-3 p-3">
+                      <Avatar user={u} size="md" />
+                      <span className="min-w-0 flex-1 truncate font-bold">{u.username}</span>
+                      <span className="hidden text-xs text-muted sm:inline">Joined {formatDate(u.createdAt)}</span>
+                    </a>
                   </li>
                 ))}
               </ul>
@@ -70,26 +72,28 @@ export default function SearchView({ query, onSelectPoll, onSelectUser }) {
           </div>
 
           <div>
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
-              Polls ({results.polls.length})
-            </h2>
+            <h2 className="section-title mb-3">Polls ({results.polls.length})</h2>
             {results.polls.length === 0 ? (
-              <p className="text-sm text-slate-500">No polls match.</p>
+              <p className="text-sm text-muted">No polls match.</p>
             ) : (
               <ul className="space-y-2">
                 {results.polls.map((p) => (
                   <li key={p.id}>
-                    <button
-                      type="button"
-                      onClick={() => onSelectPoll(p.id)}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-left shadow-sm hover:border-indigo-300 hover:bg-indigo-50"
-                    >
-                      <span className="block font-medium">{p.question}</span>
-                      <span className="text-xs text-slate-500">
-                        {p.creator ? `by ${p.creator.username} · ` : ''}
-                        {formatDate(p.createdAt)}
+                    <a href={links.poll(p.id)} className="card card-hover flex items-center gap-3 p-3">
+                      {p.imageUrl && (
+                        <span className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-raised">
+                          <AuthImage src={p.imageUrl} alt="" className="h-full w-full object-cover" />
+                        </span>
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <span className="line-clamp-2 break-words font-semibold">{p.question}</span>
+                        <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+                          {p.creator && <Avatar user={p.creator} size="xs" />}
+                          {p.creator ? `${p.creator.username} · ` : ''}
+                          {timeAgo(p.createdAt)}
+                        </span>
                       </span>
-                    </button>
+                    </a>
                   </li>
                 ))}
               </ul>

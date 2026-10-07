@@ -1,0 +1,21 @@
+# PRODUCTION OVERLAY - adds HTTPS on top of docker-compose.yml.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#   (or:  export COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml)
+#
+# Needs in .env:   HTTP_PORT=80   HTTPS_PORT=443   CORS_ORIGIN=https://your.domain
+# Needs on disk:   ./certs/fullchain.pem  and  ./certs/privkey.pem
+# And edit server_name in proxy/default.prod.conf.
+services:
+  proxy:
+    ports:
+      - "${HTTPS_PORT:-443}:8443"
+    volumes:
+      - ./proxy/default.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    healthcheck:
+      # Plain-HTTP listener answers /health directly (see default.prod.conf)
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

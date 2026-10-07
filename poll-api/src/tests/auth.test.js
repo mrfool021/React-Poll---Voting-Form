@@ -32,7 +32,7 @@ describe('POST /api/auth/register', () => {
     const res = await request(app).post('/api/auth/register').send(validUser);
 
     expect(res.status).toBe(201);
-    expect(res.body.user).toEqual({ id: 5, username: 'player_one', email: 'player@example.com' });
+    expect(res.body.user).toEqual({ id: 5, username: 'player_one', email: 'player@example.com', avatarUrl: null });
 
     const payload = jwt.verify(res.body.token, JWT_SECRET);
     expect(payload.sub).toBe('5');
@@ -100,7 +100,7 @@ describe('POST /api/auth/login', () => {
       .send({ identifier: 'player@example.com', password: 'correct horse battery' });
 
     expect(res.status).toBe(200);
-    expect(res.body.user).toEqual({ id: 9, username: 'player_one', email: 'player@example.com' });
+    expect(res.body.user).toEqual({ id: 9, username: 'player_one', email: 'player@example.com', avatarUrl: null });
     expect(jwt.verify(res.body.token, JWT_SECRET).sub).toBe('9');
   });
 
@@ -190,6 +190,31 @@ describe('GET /api/auth/me and token checks', () => {
     const none = `${b64({ alg: 'none', typ: 'JWT' })}.${b64({ sub: '3', username: 'x' })}.`;
     const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${none}`);
     expect(res.status).toBe(401);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('avatar in auth responses', () => {
+  it('login returns the uploaded-avatar URL with a cache-busting version', async () => {
+    const hash = await bcrypt.hash('correct horse battery', 4);
+    pool.execute.mockResolvedValueOnce([
+      [{ id: 9, username: 'p', email: 'p@e.co', password_hash: hash, avatar_url: null, avatar_ver: 'abc123' }],
+    ]);
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ identifier: 'p', password: 'correct horse battery' });
+    expect(res.body.user.avatarUrl).toBe('/api/users/9/avatar?v=abc123');
+  });
+
+  it('login returns an external avatar URL when no upload exists', async () => {
+    const hash = await bcrypt.hash('correct horse battery', 4);
+    pool.execute.mockResolvedValueOnce([
+      [{ id: 9, username: 'p', email: 'p@e.co', password_hash: hash, avatar_url: 'https://x.io/a.png', avatar_ver: null }],
+    ]);
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ identifier: 'p', password: 'correct horse battery' });
+    expect(res.body.user.avatarUrl).toBe('https://x.io/a.png');
   });
 });
 

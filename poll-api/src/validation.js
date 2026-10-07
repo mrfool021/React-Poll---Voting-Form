@@ -1,5 +1,7 @@
 'use strict';
 
+const { parseImageDataUrl, DEFAULT_LIMITS: IMAGE_LIMITS } = require('./images');
+
 /**
  * Input validation & sanitization helpers.
  *
@@ -38,7 +40,7 @@ function parseId(value) {
   return n <= MAX_INT ? n : null;
 }
 
-function validateNewPoll(body) {
+function validateNewPoll(body, { pollImageMaxBytes = IMAGE_LIMITS.pollImageMaxBytes } = {}) {
   const errors = [];
 
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -73,8 +75,108 @@ function validateNewPoll(body) {
     }
   }
 
+  // Optional photo. It is only ever accepted as part of THIS request: if the
+  // question or options are invalid the whole request is rejected and nothing
+  // (not even the image) is stored. There is no standalone upload endpoint.
+  let image = null;
+  const hasImageField = body.image !== undefined && body.image !== null;
+  if (hasImageField) {
+    const parsed = parseImageDataUrl(body.image, pollImageMaxBytes);
+    if (!parsed.ok) errors.push(parsed.error);
+    else image = { mime: parsed.mime, buffer: parsed.buffer };
+    if (errors.length && !errors.some((e) => e.startsWith('An image'))) {
+      const pollInvalid = errors.some((e) => /^(question|options|each option)/.test(e));
+      if (pollInvalid) {
+        errors.push('An image cannot be posted on its own: it must come with a valid question and at least 2 options.');
+      }
+    }
+  }
+
   if (errors.length) return { ok: false, errors };
-  return { ok: true, errors: [], value: { question, options } };
+  return { ok: true, errors: [], value: { question, options, image } };
+}
+
+// ---------------------------------------------------------------------------
+// Comments
+// ---------------------------------------------------------------------------
+const COMMENT_MAX = 500;
+
+/** Like sanitizeText but keeps line breaks (max one blank line in a row). */
+function sanitizeMultiline(value) {
+  if (typeof value !== 'string') return '';
+  return value
+    .normalize('NFC')
+    .replace(/\r\n?/g, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/[<>]/g, '')
+    .replace(/[\u0000-\u0009\u000B-\u001F\u007F-\u009F]/g, ' ')
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/ ?\n ?/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function validateComment(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, errors: ['Request body must be a JSON object.'] };
+  }
+  const errors = [];
+  const text = sanitizeMultiline(body.body);
+  if (text.length < 1 || text.length > COMMENT_MAX) {
+    errors.push(`body must be between 1 and ${COMMENT_MAX} characters.`);
+  }
+  let parentId = null;
+  if (body.parentId !== undefined && body.parentId !== null) {
+    parentId = parseId(body.parentId);
+    if (!parentId) errors.push('parentId must be a positive integer.');
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, errors: [], value: { body: text, parentId } };
+}
+
+// ---------------------------------------------------------------------------
+// Avatars: exactly one of { image: dataURL } or { url: https://... }
+// ---------------------------------------------------------------------------
+function validateAvatarUrl(raw) {
+  if (typeof raw !== 'string') return null;
+  const value = raw.trim();
+  if (value.length < 8 || value.length > 500 || /\s/.test(value)) return null;
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || !url.hostname.includes('.')) {
+    return null;
+  }
+  return url.toString();
+}
+
+function validateAvatar(body, { avatarMaxBytes = IMAGE_LIMITS.avatarMaxBytes } = {}) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, errors: ['Request body must be a JSON object.'] };
+  }
+  const hasImage = body.image !== undefined && body.image !== null;
+  const hasUrl = body.url !== undefined && body.url !== null;
+  if (hasImage === hasUrl) {
+    return { ok: false, errors: ['Send exactly one of "image" (base64 data URL) or "url" (https link).'] };
+  }
+  if (hasImage) {
+    const parsed = parseImageDataUrl(body.image, avatarMaxBytes);
+    if (!parsed.ok) return { ok: false, errors: [parsed.error] };
+    return { ok: true, errors: [], value: { image: { mime: parsed.mime, buffer: parsed.buffer } } };
+  }
+  const url = validateAvatarUrl(body.url);
+  if (!url) return { ok: false, errors: ['url must be a valid https:// link (max 500 characters).'] };
+  return { ok: true, errors: [], value: { url } };
+}
+
+/** ?page=N for the follower lists. Returns an integer 1..200. */
+function parsePage(value) {
+  if (value === undefined) return 1;
+  const n = typeof value === 'string' && /^[1-9]\d{0,2}$/.test(value) ? Number(value) : null;
+  return n && n <= 200 ? n : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -150,6 +252,12 @@ module.exports = {
   sanitizeText,
   parseId,
   validateNewPoll,
+  validateComment,
+  validateAvatar,
+  validateAvatarUrl,
+  sanitizeMultiline,
+  parsePage,
+  COMMENT_MAX,
   validateRegister,
   validateLogin,
 };

@@ -34,9 +34,15 @@ describe('GET /api/search', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.polls).toEqual([
-      { id: 4, question: 'Best game ever?', createdAt: 'd1', creator: { id: 2, username: 'ivan' } },
+      {
+        id: 4,
+        question: 'Best game ever?',
+        createdAt: 'd1',
+        imageUrl: null,
+        creator: { id: 2, username: 'ivan', avatarUrl: null },
+      },
     ]);
-    expect(res.body.users).toEqual([{ id: 2, username: 'ivan', createdAt: 'd2' }]);
+    expect(res.body.users).toEqual([{ id: 2, username: 'ivan', avatarUrl: null, createdAt: 'd2' }]);
   });
 
   it('never exposes email or password hash', async () => {
@@ -78,42 +84,7 @@ describe('GET /api/search', () => {
 });
 
 // ---------------------------------------------------------------------------
-describe('GET /api/users/:id', () => {
-  it('returns the profile and the polls that user created', async () => {
-    pool.execute
-      .mockResolvedValueOnce([[{ id: 2, username: 'ivan', created_at: 'joined' }]])
-      .mockResolvedValueOnce([[{ id: 9, question: 'Best editor?', created_at: 'c' }]]);
-
-    const res = await get('/api/users/2');
-
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({
-      id: 2,
-      username: 'ivan',
-      createdAt: 'joined',
-      polls: [{ id: 9, question: 'Best editor?', createdAt: 'c' }],
-    });
-    expect(pool.execute.mock.calls[0][1]).toEqual([2]);
-    expect(pool.execute.mock.calls[1][1]).toEqual([2]);
-  });
-
-  it('returns 404 for an unknown user', async () => {
-    pool.execute.mockResolvedValueOnce([[]]);
-    const res = await get('/api/users/999');
-    expect(res.status).toBe(404);
-  });
-
-  it.each(['abc', '0', '-1', '1.5', '99999999999'])('rejects invalid id "%s" with 400', async (bad) => {
-    const res = await get(`/api/users/${bad}`);
-    expect(res.status).toBe(400);
-    expect(pool.execute).not.toHaveBeenCalled();
-  });
-
-  it('returns 401 without a token', async () => {
-    const res = await request(app).get('/api/users/2');
-    expect(res.status).toBe(401);
-  });
-});
+// (profile, avatar and follow tests live in users.test.js)
 
 // ---------------------------------------------------------------------------
 describe('likePattern', () => {
